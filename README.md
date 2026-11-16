@@ -32,4 +32,4 @@ assistants** in the app, or run `/mcp` and log out.
 
 ## Help
 
-[docs.alexein.ai/mcp](https://docs.alexein.ai/mcp) · support@alexein.ai · [Privacy](https://alexein.ai/legal/privacy)
+[docs.alexein.ai/mcp](https://docs.alexein.ai/mcp) · zainali@alexein.ai · [Privacy](https://alexein.ai/legal/privacy)
