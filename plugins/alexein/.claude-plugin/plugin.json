@@ -8,7 +8,14 @@
     "url": "https://alexein.ai"
   },
   "homepage": "https://docs.alexein.ai/mcp",
-  "keywords": ["memory", "mcp", "alexein"],
+  "license": "MIT",
+  "privacyPolicyUrl": "https://alexein.ai/legal/privacy",
+  "icon": "./.claude-plugin/icon.png",
+  "keywords": [
+    "memory",
+    "mcp",
+    "alexein"
+  ],
   "userConfig": {
     "api_key": {
       "type": "string",
