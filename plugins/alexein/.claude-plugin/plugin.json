@@ -10,6 +10,9 @@
   "homepage": "https://docs.alexein.ai/mcp",
   "license": "MIT",
   "privacyPolicyUrl": "https://alexein.ai/legal/privacy",
+  "termsOfServiceUrl": "https://alexein.ai/legal/terms",
+  "supportUrl": "https://docs.alexein.ai/mcp/troubleshooting",
+  "repository": "https://github.com/Alexein-AI/claude-plugins",
   "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "memory",
