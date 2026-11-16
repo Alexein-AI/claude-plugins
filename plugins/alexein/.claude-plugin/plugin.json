@@ -1,12 +1,35 @@
 {
   "name": "alexein",
-  "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time.",
-  "version": "0.1.0",
+  "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time. With an API key, it also brings what memory holds into each new session and saves your sessions to memory.",
+  "version": "0.2.0",
   "author": {
     "name": "Alexein",
     "email": "zainali@alexein.ai",
     "url": "https://alexein.ai"
   },
   "homepage": "https://docs.alexein.ai/mcp",
-  "keywords": ["memory", "mcp", "alexein"]
+  "keywords": ["memory", "mcp", "alexein"],
+  "userConfig": {
+    "api_key": {
+      "type": "string",
+      "title": "Alexein API key (optional)",
+      "description": "Optional. A personal key from My memory > Keys in the Alexein app; Read and write to save sessions. Without one, the memory tools still work through sign-in, and only the note on how to use them is added at each session start. With one, each session's first message is looked up in your memory (one retrieval per session) and your sessions are saved to it.",
+      "sensitive": true,
+      "required": false
+    },
+    "capture": {
+      "type": "boolean",
+      "title": "Save sessions to memory",
+      "description": "With an API key: save what you ask and Claude Code's replies, with the names of files changed and commands run (never file contents or command output), in batches of five exchanges. Off keeps recall only.",
+      "default": true,
+      "required": false
+    },
+    "api_url": {
+      "type": "string",
+      "title": "Alexein API address",
+      "description": "Where the API key is used. Leave as it is unless you run Alexein yourself.",
+      "default": "https://api.alexein.ai",
+      "required": false
+    }
+  }
 }
