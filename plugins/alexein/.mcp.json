@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "alexein": {
+      "type": "http",
+      "url": "https://api.alexein.ai/v1/mcp"
+    }
+  }
+}

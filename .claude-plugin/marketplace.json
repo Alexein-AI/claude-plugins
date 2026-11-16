@@ -1,0 +1,19 @@
+{
+  "name": "alexein",
+  "description": "Alexein for Claude Code: long-term memory shared across your sessions and apps",
+  "owner": {
+    "name": "Alexein",
+    "email": "support@alexein.ai",
+    "url": "https://alexein.ai"
+  },
+  "plugins": [
+    {
+      "name": "alexein",
+      "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time.",
+      "source": "./plugins/alexein",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["memory", "mcp", "alexein"]
+    }
+  ]
+}
