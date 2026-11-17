@@ -1,5 +1,5 @@
 {
-  "description": "Alexein memory: how it is used, at every session start; what memory holds for a session's first prompt; and the session's exchanges saved to memory in batches.",
+  "description": "Alexein memory: how it is used, at every session start; what memory holds for a session's first prompt; once a session, a reply that asks the person something before memory was searched is sent back for a search; and the session's exchanges saved to memory in batches.",
   "hooks": {
     "SessionStart": [
       {
