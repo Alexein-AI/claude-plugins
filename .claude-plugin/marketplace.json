@@ -11,7 +11,7 @@
       "name": "alexein",
       "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time.",
       "source": "./plugins/alexein",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "category": "productivity",
       "tags": ["memory", "mcp", "alexein"]
     }
