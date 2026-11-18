@@ -64,6 +64,26 @@ The tools are listed at [docs.alexein.ai/mcp/tools](https://docs.alexein.ai/mcp/
 seen and erased in the Alexein app, under **My memory**. To disconnect, select **Disconnect** on Claude Code in **My memory › AI
 assistants** in the app, or run `/mcp` and log out.
 
+## The same hooks in other agents
+
+`plugins/alexein/scripts/alexein_hooks.py` also runs in other coding agents, as
+`alexein_hooks.py run <host> <action>`; what each agent sends is turned into what Claude Code sends, so the same
+code does the work. Their plugins carry a copy (`make sync` copies it into checkouts beside this one):
+
+| Agent | Plugin | How Alexein is used | First-message recall | Saving sessions |
+|---|---|---|---|---|
+| GitHub Copilot (CLI and VS Code) | [copilot-plugin](https://github.com/Alexein-AI/copilot-plugin), `com.github.copilot/hooks/hooks.json` | session start | with the first tool result (its prompt hook can't add context) | reply from its transcript |
+| Cursor | [cursor-plugin](https://github.com/Alexein-AI/cursor-plugin), `hooks/hooks.json` | an always-on rule | with the first tool result | reply from `afterAgentResponse` |
+| Antigravity | [antigravity-plugin](https://github.com/Alexein-AI/antigravity-plugin), `hooks.json` | `rules/AGENTS.md` | `PreInvocation` | reply from its transcript; no session end, so the rest goes at a later session start |
+| Codex | none yet: plugin hooks run only for plugins installed by hand in its desktop app | session start | yes | `last_assistant_message` |
+| Gemini CLI | none yet (an extension can carry hooks) | session start | yes | `AfterAgent` |
+
+Outside Claude Code there are no plugin options: the key is `ALEXEIN_API_KEY` (or `api_key` in
+`~/.config/alexein/hooks.json`), with `ALEXEIN_CAPTURE=false` to keep recall only and `ALEXEIN_API_URL` for a
+self-hosted API. Without a key only the note on how to use the memory tools is added. Each agent keeps its state in
+its plugin data folder where it has one, or `~/.alexein/hooks/<host>/`; `run <host> pause | resume | status`
+work there as the slash commands do here.
+
 ## Development
 
 `make test` runs the hooks' tests (Python's standard library only; nothing reaches the network). `make check` also
