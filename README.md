@@ -13,10 +13,13 @@ team's conversations and past decisions, not only this chat.
 
 ## Install
 
-In Claude Code:
+In Claude Code, send these one at a time, and let each finish:
 
 ```
 /plugin marketplace add Alexein-AI/claude-plugins
+```
+
+```
 /plugin install alexein@alexein
 ```
 
