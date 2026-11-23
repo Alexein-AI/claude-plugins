@@ -502,9 +502,11 @@ class Capture(Base):
             [i["text"] for i in items], ["what is the plan for the ledger", "The plan is X."]
         )
 
-    def test_an_answer_read_from_memory_is_not_saved_back(self) -> None:
+    def test_an_exchange_that_only_read_memory_is_not_saved(self) -> None:
         """The hunt (2026-11-23): "Which package manager do I use?" and its answer, restated from
-        memory, were saved as a new exchange and came back later as evidence."""
+        memory, were saved as a new exchange and came back later as evidence; the question kept
+        alone came back in the next session's first recall ahead of the fact (2026-11-23, round
+        2). Something new said with it is the agent's to save with memory_add."""
         base = {"session_id": "s1", "cwd": "/work/billing"}
         self.run_hook("prompt", {**base, "prompt": "Which package manager do I use?"})
         self.run_hook(
@@ -518,11 +520,9 @@ class Capture(Base):
         self.run_hook("stop", {**base, "last_assistant_message": "You prefer pnpm."})
         self.inline = False
         self.run_hook("flush", base)
-        items = json.loads(self.outbox()[0].read_text())["body"]["items"]
-        self.assertEqual([i["role"] for i in items], ["user"])
-        self.assertNotIn("pnpm", json.dumps(items))
+        self.assertEqual(self.outbox(), [])
 
-    def test_an_answer_from_the_first_recall_is_not_saved_back(self) -> None:
+    def test_an_exchange_answered_from_the_first_recall_is_not_saved(self) -> None:
         base = {"session_id": "s1", "cwd": "/work/billing"}
         net = Network(Response(200, SEARCH))
         self.run_hook(
@@ -533,10 +533,7 @@ class Capture(Base):
         self.inline = False
         self.run_hook("flush", base)
         items = json.loads(self.outbox()[0].read_text())["body"]["items"]
-        self.assertEqual(
-            [i["id"] for i in items],
-            ["claude-code-s1:1:user", "claude-code-s1:2:user", "claude-code-s1:2:assistant"],
-        )
+        self.assertEqual([i["text"] for i in items], ["short 2", "reply 2"])
 
     def test_work_done_after_reading_memory_is_still_saved(self) -> None:
         base = {"session_id": "s1", "cwd": "/work/billing"}

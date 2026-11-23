@@ -57,9 +57,9 @@ With a key, Claude Code also uses your memory on its own:
   one retrieval on your plan. Later messages are not looked up; Claude can still search with the memory tools.
 - **Saving sessions.** What you ask and Claude Code's final replies are saved to your memory, together with the
   names of the files it changed and the commands it ran, and whether each one failed. File contents and command
-  output are never saved. A reply that answered from your memory, with nothing changed or run, is not saved, so
-  what memory already holds does not come back as something new; your question is. Exchanges are sent five at a time, and what is left is sent when the conversation is
-  compacted or the session ends. Each message saved counts as one event on your plan (two per exchange).
+  output are never saved. An exchange answered from your memory, with nothing changed or run, is not saved, so
+  what memory already holds does not come back as something new. Exchanges are sent five at a time, and what
+  is left is sent when the conversation is compacted or the session ends. Each message saved counts as one event on your plan (two per exchange).
   Anything that looks like a password, key or token is removed before it leaves your computer.
 - If a send fails (for example, you are offline), it is kept on your computer and sent again when your next
   session starts. If the API refuses the key (it was revoked), nothing is looked up or saved with it again until
