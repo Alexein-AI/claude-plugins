@@ -10,6 +10,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -501,6 +502,53 @@ class Capture(Base):
             [i["text"] for i in items], ["what is the plan for the ledger", "The plan is X."]
         )
 
+    def test_an_exchange_that_only_read_memory_is_not_saved(self) -> None:
+        """The hunt (2026-11-23): "Which package manager do I use?" and its answer, restated from
+        memory, were saved as a new exchange and came back later as evidence; the question kept
+        alone came back in the next session's first recall ahead of the fact (2026-11-23, round
+        2). Something new said with it is the agent's to save with memory_add."""
+        base = {"session_id": "s1", "cwd": "/work/billing"}
+        self.run_hook("prompt", {**base, "prompt": "Which package manager do I use?"})
+        self.run_hook(
+            "tool",
+            {
+                **base,
+                "tool_name": "mcp__plugin_alexein_alexein__memory_search",
+                "tool_input": {"query": "package manager"},
+            },
+        )
+        self.run_hook("stop", {**base, "last_assistant_message": "You prefer pnpm."})
+        self.inline = False
+        self.run_hook("flush", base)
+        self.assertEqual(self.outbox(), [])
+
+    def test_an_exchange_answered_from_the_first_recall_is_not_saved(self) -> None:
+        base = {"session_id": "s1", "cwd": "/work/billing"}
+        net = Network(Response(200, SEARCH))
+        self.run_hook(
+            "prompt", {**base, "prompt": "Do I prefer tabs or spaces these days?"}, net=net
+        )
+        self.run_hook("stop", {**base, "last_assistant_message": "Tabs, you said."})
+        self.exchange(2)  # the next exchange read nothing: its reply is kept
+        self.inline = False
+        self.run_hook("flush", base)
+        items = json.loads(self.outbox()[0].read_text())["body"]["items"]
+        self.assertEqual([i["text"] for i in items], ["short 2", "reply 2"])
+
+    def test_work_done_after_reading_memory_is_still_saved(self) -> None:
+        base = {"session_id": "s1", "cwd": "/work/billing"}
+        self.run_hook("prompt", {**base, "prompt": "add the lint step we agreed on"})
+        self.run_hook(
+            "tool",
+            {**base, "tool_name": "mcp__alexein__memory_search", "tool_input": {"query": "lint"}},
+        )
+        self.run_hook("tool", {**base, "tool_name": "Bash", "tool_input": {"command": "make lint"}})
+        self.run_hook("stop", {**base, "last_assistant_message": "Added the lint step."})
+        self.inline = False
+        self.run_hook("flush", base)
+        items = json.loads(self.outbox()[0].read_text())["body"]["items"]
+        self.assertEqual(items[1]["text"], "Commands run: `make lint`.\n\nAdded the lint step.")
+
     def test_a_continued_stop_is_not_a_second_exchange(self) -> None:
         base = {"session_id": "s1"}
         self.exchange(1)
@@ -716,7 +764,51 @@ class Status(Base):
     def test_no_key(self) -> None:
         env = {k: v for k, v in self.env.items() if k != "CLAUDE_PLUGIN_OPTION_API_KEY"}
         self.run_hook("session-start", {"session_id": "s1"}, env=env)
-        self.assertIn("API key: not set", self.command("status"))
+        shown = self.command("status")
+        self.assertIn("API key: not set", shown)
+        self.assertIn("Saving sessions: off (needs an API key)", shown)
+
+    def test_a_refused_key_is_shown_and_not_tried_again(self) -> None:
+        """The hunt (2026-11-23): a revoked key showed as "set", and every session tried it."""
+        self.run_hook("session-start", {"session_id": "s1"})
+        net = Network(Response(401, {"detail": "a bearer this service issued is required"}))
+        self.run_hook(
+            "prompt", {"session_id": "s1", "prompt": "a question long enough to search"}, net=net
+        )
+        shown = self.command("status")
+        self.assertIn("API key: refused (HTTP 401) at ", shown)
+        self.assertIn("My memory › Keys", shown)
+        self.assertIn("Saving sessions: off until the key is replaced", shown)
+        self.assertNotIn("tm_testkey", (self.data / "refused.json").read_text())
+        # `refuse`: the same key is not tried again, and nothing is recorded to send with it.
+        self.run_hook("session-start", {"session_id": "s2"})
+        self.run_hook("prompt", {"session_id": "s2", "prompt": "another question long enough"})
+        self.run_hook("stop", {"session_id": "s2", "last_assistant_message": "reply"})
+        self.run_hook("flush", {"session_id": "s2"})
+        self.assertEqual(self.outbox(), [])
+        # A new key is tried, and status no longer says refused.
+        env = {**self.env, "CLAUDE_PLUGIN_OPTION_API_KEY": "tm_newkey_0123456789abcdef"}
+        net = Network(Response(200, SEARCH))
+        self.run_hook("session-start", {"session_id": "s3"}, env=env)
+        self.run_hook(
+            "prompt",
+            {"session_id": "s3", "prompt": "a question long enough to search"},
+            env=env,
+            net=net,
+        )
+        self.assertEqual(len(net.requests), 1)
+        shown = self.command("status")
+        self.assertIn("API key: set", shown)
+        self.assertIn("Saving sessions: on", shown)
+
+    def test_a_send_refused_for_the_key_stops_the_retries(self) -> None:
+        self.exchange(1)
+        self.run_hook(
+            "flush", {"session_id": "s1"}, net=Network(Response(401, {"detail": "revoked"}))
+        )
+        self.assertEqual(len(self.outbox()), 1)  # kept, for a new key to send
+        self.run_hook("session-start", {"session_id": "s2"})  # `refuse`: not tried again
+        self.assertIn("API key: refused (HTTP 401)", self.command("status"))
 
 
 class Robustness(Base):
@@ -790,6 +882,19 @@ class Manifest(unittest.TestCase):
                         '"${CLAUDE_PLUGIN_ROOT}/scripts/alexein_hooks.py"', hook["command"]
                     )
                     self.assertLessEqual(hook["timeout"], 5)
+                    # Windows names Python 3 `python`; `python3` there is often only the Store's
+                    # stand-in, which fails.
+                    first, fallback = hook["command"].split(" || ")
+                    self.assertTrue(first.startswith("python3 "), event)
+                    self.assertEqual(fallback, first.replace("python3 ", "python ", 1))
+        matcher = re.compile(config["PostToolUse"][0]["matcher"])
+        for name in (
+            "Edit",
+            "Bash",
+            "mcp__plugin_alexein_alexein__memory_search",
+            "mcp__alexein__memory_open",
+        ):
+            self.assertTrue(matcher.fullmatch(name), name)
 
     def test_user_config(self) -> None:
         manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text())
