@@ -23,6 +23,10 @@ In Claude Code, send these one at a time, and let each finish:
 /plugin install alexein@alexein
 ```
 
+Claude Code asks where to install it: choose **Install for you (user scope)**. It then asks for the plugin's
+options, or says "3 userConfig options not yet set": all three are optional, so leave the API key empty and keep
+the others as they are (see below for what a key adds).
+
 Then run `/mcp` in Claude Code, choose **alexein** and select **Authenticate**: Alexein's sign-in opens in your
 browser. Sign in, choose what Claude Code may do (read only, or read and save), and select **Allow**. No API key is
 needed. Until then, `/mcp` lists alexein as needing authentication.
@@ -34,6 +38,12 @@ claude mcp add --transport http --scope user alexein https://api.alexein.ai/v1/m
 ```
 
 then run `/mcp`, choose **alexein**, and sign in.
+
+### Updates
+
+Claude Code does not update plugins from a marketplace you added yourself unless you turn it on: run `/plugin`,
+open **Marketplaces**, choose **alexein** and select **Turn on auto-update**. To update by hand, run
+`claude plugin marketplace update alexein`, then `claude plugin update alexein@alexein`, and restart Claude Code.
 
 ## Recall and saving sessions (optional API key)
 
@@ -47,11 +57,13 @@ With a key, Claude Code also uses your memory on its own:
   one retrieval on your plan. Later messages are not looked up; Claude can still search with the memory tools.
 - **Saving sessions.** What you ask and Claude Code's final replies are saved to your memory, together with the
   names of the files it changed and the commands it ran, and whether each one failed. File contents and command
-  output are never saved. Exchanges are sent five at a time, and what is left is sent when the conversation is
+  output are never saved. A reply that answered from your memory, with nothing changed or run, is not saved, so
+  what memory already holds does not come back as something new; your question is. Exchanges are sent five at a time, and what is left is sent when the conversation is
   compacted or the session ends. Each message saved counts as one event on your plan (two per exchange).
   Anything that looks like a password, key or token is removed before it leaves your computer.
 - If a send fails (for example, you are offline), it is kept on your computer and sent again when your next
-  session starts.
+  session starts. If the API refuses the key (it was revoked), nothing is looked up or saved with it again until
+  you set a new one, and `/alexein:status` says so.
 
 To add a key, make a personal key in the Alexein app under **My memory › Keys** (choose **Read and write** to
 save sessions). Then run `/plugin` in Claude Code, open **Installed**, choose **alexein**, select
@@ -59,14 +71,20 @@ save sessions). Then run `/plugin` in Claude Code, open **Installed**, choose **
 store, not in your settings file. The same dialog has **Save sessions to memory**: turn it off to keep recall but
 save nothing.
 
+Without the dialog (a script, a remote machine), pass the key when you install, with
+`claude plugin install alexein@alexein --config api_key=<your key>`, or set it later by sending
+`{"api_key": "<your key>"}` on standard input to `claude plugin configure alexein@alexein --values-stdin`.
+
 Commands:
 
 - `/alexein:pause`: nothing is recorded or sent, and nothing is recalled, until you resume. The memory tools still
   work when Claude uses them.
 - `/alexein:resume`: turns recall and saving back on.
-- `/alexein:status`: whether a key is set, whether saving is on or paused, and how many exchanges wait to be sent.
+- `/alexein:status`: whether a key is set (and whether the API refused it), whether saving is on or paused, and
+  how many exchanges wait to be sent.
 
-The hooks need `python3` on your `PATH`. What they keep on your computer is in Claude Code's data folder for the
+The hooks need Python 3 on your `PATH`, as `python3` or, where that is missing (as on Windows), `python`. Without
+it, the memory tools still work, but Claude Code reports a hook error at each session start. What they keep on your computer is in Claude Code's data folder for the
 plugin (`~/.claude/plugins/data/alexein-alexein/`) and is removed when you uninstall the plugin.
 
 ## What it can do
@@ -99,7 +117,7 @@ work there as the slash commands do here.
 
 `make test` runs the hooks' tests (Python's standard library only; nothing reaches the network). `make check` also
 runs `claude plugin validate`. To try the hooks against a local Alexein, set **Alexein API address** to
-`http://localhost:8311` (plain `http` is used only for `localhost`).
+`http://localhost:8210`, where a local Alexein's API listens (plain `http` is used only for `localhost`).
 
 ## Help
 
