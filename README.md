@@ -1,5 +1,7 @@
 # Alexein for Claude Code
 
+[![Alexein AI MCP connector](https://glama.ai/mcp/connectors/ai.alexein/memory/badges/score.svg)](https://glama.ai/mcp/connectors/ai.alexein/memory)
+
 Gives Claude Code your [Alexein](https://alexein.ai) memory: it searches what you have told it before answering,
 and saves what it learns as you work, so the next session, and your other apps, pick up where this one left off.
 
