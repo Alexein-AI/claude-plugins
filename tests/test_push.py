@@ -25,6 +25,8 @@ from unittest import mock
 
 from test_hooks import SCRIPT, SEARCH, Base, Network, Response, hooks, refuse
 
+ASK_THE_API = hooks.key_kind  # Base stands in for it; the KeyKind tests use it
+
 LEDGER = "How did we set up the billing ledger again?"
 FLAGS = {name: "1" for name in hooks.FLAGS}
 
@@ -509,10 +511,10 @@ class AskCatch(Flags):
         run(self, "cursor", "prompt", {**base, "prompt": "hi"}, env)
         run(self, "cursor", "prompt", {**base, "prompt": TASK}, env)
         run(self, "cursor", "reply", {**base, "text": ASKS}, env)
-        out = run(self, "cursor", "stop", {**base, "status": "completed"}, env, Network(Response(200, FOUND)))
-        self.assertIn("Before asking", json.loads(out)["followup_message"])
-        # Its follow-up comes back as a new loop: never sent back again.
-        self.assertEqual(run(self, "cursor", "stop", {**base, "loop_count": 1}, env), "")
+        # Cursor would submit the reason as the person's next message, and it would be saved as
+        # theirs (review, 2026-11-26): the flag is ignored there. `refuse`: nothing is looked up.
+        self.assertEqual(run(self, "cursor", "stop", {**base, "status": "completed"}, env), "")
+        self.assertFalse(hooks.Config(env=env, host="cursor").ask_catch)
 
         transcript = self.tmp / "ag.jsonl"
         transcript.write_text(
@@ -541,10 +543,19 @@ class InTheEnvironment(Base):
             def log_message(self, *_):
                 return None
 
+            def do_GET(self):  # noqa: N802
+                asked.append({"path": self.path, "user": self.headers.get("X-Alexein-User")})
+                raw = json.dumps({"kind": "key", "project": "_a1b2c3d4e5"}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
             def do_POST(self):  # noqa: N802
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 asked.append({"path": self.path, "auth": self.headers["Authorization"], **body})
-                raw = json.dumps(RATE if len(asked) > 1 else SEARCH).encode()
+                searched = sum(1 for a in asked if a["path"].endswith("/search"))
+                raw = json.dumps(RATE if searched > 1 else SEARCH).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(raw)))
                 self.end_headers()
@@ -556,8 +567,8 @@ class InTheEnvironment(Base):
         env = {
             "PATH": os.environ.get("PATH", ""),
             "CLAUDE_PLUGIN_DATA": str(self.data),
-            "ALEXEIN_API_KEY": "tm_envkey_0123456789abcdef",
-            "ALEXEIN_API_URL": f"http://127.0.0.1:{server.server_address[1]}",
+            "CLAUDE_PLUGIN_OPTION_API_KEY": "tm_envkey_0123456789abcdef",
+            "CLAUDE_PLUGIN_OPTION_API_URL": f"http://127.0.0.1:{server.server_address[1]}",
             "ALEXEIN_RECALL_EVERY_PROMPT": "1",
         }
 
@@ -573,8 +584,10 @@ class InTheEnvironment(Base):
 
         self.assertIn(hooks.RECALL_HEAD, run(LEDGER))
         self.assertIn("default is 50", run("Now change the scheduler rate limit default for tenants"))
-        self.assertEqual([a["path"] for a in asked], ["/v2/memory/search"] * 2)
-        self.assertEqual(asked[0]["auth"], "Bearer tm_envkey_0123456789abcdef")
+        # Asked once what the key is, naming no app user, then used.
+        self.assertEqual([a["path"] for a in asked], ["/v1/me"] + ["/v2/memory/search"] * 2)
+        self.assertIsNone(asked[0]["user"])
+        self.assertEqual(asked[1]["auth"], "Bearer tm_envkey_0123456789abcdef")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -722,18 +735,32 @@ class SignIn(Base):
                 self.assertEqual(console.asked["client"], host)
         self.assertEqual(hooks.HOSTS["gemini"].client, "")
 
-    def test_cancel_keeps_nothing_and_waits_a_week(self) -> None:
+    def back_dated(self, days: float, **fields) -> None:
+        tried = json.loads((self.data / hooks.SIGN_IN_STATE).read_text())
+        then = time.gmtime(time.time() - days * 86400)
+        tried.update(fields, opened_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", then))
+        (self.data / hooks.SIGN_IN_STATE).write_text(json.dumps(tried))
+
+    def test_cancel_keeps_nothing_and_never_reopens_by_itself(self) -> None:
         self.console(allow="cancel")
         self.assertEqual(self.helper(), "cancelled")
         self.assertFalse((self.data / hooks.SIGNED_IN).exists())
-        tried = json.loads((self.data / hooks.SIGN_IN_STATE).read_text())
-        three_days = time.time() - 3 * 86400
-        tried["opened_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(three_days))
-        (self.data / hooks.SIGN_IN_STATE).write_text(json.dumps(tried))
-        self.run_hook("session-start", {"session_id": "s1", "source": "startup"})
+        self.back_dated(400)
+        with mock.patch.object(hooks.sys, "platform", "darwin"):
+            self.run_hook("session-start", {"session_id": "s1", "source": "startup"})
         self.assertEqual(self.helpers, [])
         self.assertIn("Last sign-in:", self.command("status"))
         self.assertIn("cancelled", self.command("status"))
+        self.assertIn("browser is opening", self.command("sign-in"))  # asked for: it opens
+        self.assertEqual(self.helpers, ["sign-in-helper"])
+
+    def test_left_unanswered_three_times_it_stops_opening(self) -> None:
+        self.console()
+        with mock.patch.object(hooks.sys, "platform", "darwin"):
+            for n in range(5):
+                self.run_hook("session-start", {"session_id": f"s{n}", "source": "startup"})
+                self.back_dated(2)  # a day and more later, not answered
+        self.assertEqual(self.helpers, ["sign-in-helper"] * hooks.SIGN_IN_TRIES)
 
     def test_a_refused_exchange_or_a_redirect_keeps_nothing(self) -> None:
         for status in (400, 307):
@@ -828,10 +855,29 @@ class SignIn(Base):
     def test_the_console_beside_the_api(self) -> None:
         cfg = hooks.Config(env={})
         self.assertEqual(hooks.console_url(cfg), "https://memory.alexein.ai")
-        cfg = hooks.Config(env={"ALEXEIN_API_KEY": "k", "ALEXEIN_API_URL": "http://localhost:8210"})
-        self.assertEqual(hooks.console_url(cfg), "http://localhost:3003")
+        local = {"CLAUDE_PLUGIN_OPTION_API_URL": "http://localhost:8210"}
+        self.assertEqual(hooks.console_url(hooks.Config(env=local)), "http://localhost:3003")
         cfg = hooks.Config(env={"ALEXEIN_CONSOLE_URL": "http://console.example"})
         self.assertEqual(hooks.console_url(cfg), "")  # plain http only to this computer
+        # A self-hosted API: its console is not known, and never guessed as the hosted one.
+        hosted_elsewhere = {"CLAUDE_PLUGIN_OPTION_API_URL": "https://memory.acme.example"}
+        self.assertEqual(hooks.console_url(hooks.Config(env=hosted_elsewhere)), "")
+        with_console = {**hosted_elsewhere, "ALEXEIN_CONSOLE_URL": "https://app.acme.example"}
+        self.assertEqual(hooks.console_url(hooks.Config(env=with_console)), "https://app.acme.example")
+
+    def test_a_self_hosted_api_is_never_signed_in_to_the_hosted_one(self) -> None:
+        env = {**self.env, "CLAUDE_PLUGIN_OPTION_API_URL": "https://memory.acme.example"}
+        with mock.patch.object(hooks.sys, "platform", "darwin"):
+            out = self.run_hook("session-start", {"session_id": "s1", "source": "startup"}, env=env)
+        self.assertEqual(self.helpers, [])
+        self.assertIn("no personal key for https://memory.acme.example", out)
+        self.assertIn("ALEXEIN_CONSOLE_URL", out)
+        # A key minted for the hosted API is not sent in place of the configured one.
+        (self.data / hooks.SIGNED_IN).write_text(
+            json.dumps({"key": "tm_minted_0123456789abcdef", "api_url": "https://api.alexein.ai"})
+        )
+        self.assertEqual(hooks.Config(env=env).key, "")
+        self.assertEqual(hooks.Config(env=self.env).key, "tm_minted_0123456789abcdef")
 
     def test_a_kept_key_for_a_bare_http_api_is_not_used(self) -> None:
         self.data.mkdir(parents=True)
@@ -846,3 +892,119 @@ class SignIn(Base):
             text = (skills / name / "SKILL.md").read_text()
             self.assertIn(f'alexein_hooks.py" {name} "${{CLAUDE_PLUGIN_DATA}}"', text)
             self.assertIn("disable-model-invocation: true", text)
+
+
+class KeyKind(Base):
+    """Every request names the app user `me`. For a personal key that is the person's own
+    memory; for a project's key it would be an app user of that project, where a developer's
+    sessions would be saved and billed (review, 2026-11-26). A key is used only once the API
+    says it is personal."""
+
+    ME_PERSONAL = {"kind": "key", "org": "acme", "project": "_a1b2c3d4e5", "writes": True}
+    ME_PROJECT = {"kind": "key", "org": "acme", "project": "production", "writes": True}
+
+    def setUp(self) -> None:
+        super().setUp()
+        real = mock.patch.object(hooks, "key_kind", ASK_THE_API)
+        real.start()
+        self.addCleanup(real.stop)
+
+    def test_a_personal_key_is_asked_about_once_then_used(self) -> None:
+        net = Network(Response(200, self.ME_PERSONAL), Response(200, SEARCH))
+        out = self.run_hook("prompt", {"session_id": "s1", "prompt": LEDGER}, net=net)
+        self.assertIn("additionalContext", out)
+        me, search = net.requests
+        self.assertEqual((me["method"], me["url"]), ("GET", "https://api.example.test/v1/me"))
+        self.assertNotIn("x-alexein-user", me["headers"])
+        self.assertEqual(search["headers"]["x-alexein-user"], "me")
+        self.assertNotIn("tm_testkey", (self.data / hooks.KINDS).read_text())
+        net = Network(Response(200, SEARCH))
+        self.run_hook("prompt", {"session_id": "s2", "prompt": LEDGER}, net=net)
+        self.assertEqual([r["url"] for r in net.requests], ["https://api.example.test/v2/memory/search"])
+
+    def test_a_project_key_is_never_sent_with_me(self) -> None:
+        self.env["ALEXEIN_CONSOLE_URL"] = "https://console.example.test"  # its API is not hosted
+        net = Network(Response(200, self.ME_PROJECT))
+        self.run_hook("session-start", {"session_id": "s1", "source": "startup"}, net=net)
+        self.assertEqual(len(net.requests), 1)
+        # `refuse`: nothing is looked up, recorded or sent with it, in any hook.
+        for n in range(6):
+            self.exchange(n)
+        self.run_hook("flush", {"session_id": "s1"})
+        self.assertFalse((self.data / "outbox").exists() and any((self.data / "outbox").iterdir()))
+        shown = self.command("status")
+        self.assertIn("not a personal key", shown)
+        self.assertIn("/alexein:sign-in", shown)
+        self.assertNotIn("tm_testkey", shown)
+        # The sign-in is offered instead, and its key is the one used.
+        self.assertEqual(self.helpers, ["sign-in-helper"])
+        (self.data / hooks.SIGNED_IN).write_text(
+            json.dumps({"key": "tm_minted_0123456789abcdef", "api_url": "https://api.example.test"})
+        )
+        cfg = hooks.Config(env=self.env)
+        self.assertEqual((cfg.key, cfg.key_source, cfg.online), ("tm_minted_0123456789abcdef", "sign-in", True))
+
+    def test_a_bench_names_the_project_it_means(self) -> None:
+        env = {**self.env, "ALEXEIN_HOOKS_PROJECT": "acme.staging"}
+        net = Network(Response(200, self.ME_PROJECT))
+        self.assertEqual(self.run_hook("prompt", {"session_id": "s1", "prompt": LEDGER}, env=env, net=net), "")
+        env["ALEXEIN_HOOKS_PROJECT"] = "acme.production"
+        net = Network(Response(200, SEARCH))
+        out = self.run_hook("prompt", {"session_id": "s2", "prompt": LEDGER}, env=env, net=net)
+        self.assertIn("additionalContext", out)
+        self.assertEqual(net.requests[0]["headers"]["x-alexein-user"], "me")
+
+    def test_the_other_agents_check_their_key_too(self) -> None:
+        env = {
+            "ALEXEIN_API_KEY": "tm_testkey_0123456789abcdef",
+            "ALEXEIN_API_URL": "https://api.example.test",
+            "HOME": str(self.tmp),
+        }
+        for host in ("copilot", "cursor", "antigravity", "codex", "gemini"):
+            with self.subTest(host=host):
+                data = self.tmp / host
+                net = Network(Response(200, self.ME_PROJECT))
+                out = io.StringIO()
+                payload = {"session_id": "x", "prompt": LEDGER, "lastUserInput": LEDGER}
+                with (
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch.object(hooks, "SETTINGS", self.tmp / "none.json"),
+                    mock.patch("sys.stdin", io.StringIO(json.dumps(payload))),
+                    mock.patch.object(hooks.urllib.request, "urlopen", net),
+                    redirect_stdout(out),
+                ):
+                    hooks.main(["x", "run", host, "prompt", str(data)])
+                self.assertEqual([r["url"] for r in net.requests], ["https://api.example.test/v1/me"])
+
+    def test_the_service_secret_is_not_used_either(self) -> None:
+        net = Network(Response(200, {"kind": "service", "writes": True}))
+        self.run_hook("prompt", {"session_id": "s1", "prompt": LEDGER}, net=net)
+        self.assertEqual(len(net.requests), 1)
+
+    def test_unanswered_is_unused_and_asked_again_later(self) -> None:
+        net = Network(urllib.error.URLError("offline"))
+        self.assertEqual(self.run_hook("prompt", {"session_id": "s1", "prompt": LEDGER}, net=net), "")
+        self.assertEqual(len(net.requests), 1)
+        # Within KIND_RETRY, not asked again (`refuse`); after it, asked.
+        self.run_hook("prompt", {"session_id": "s2", "prompt": LEDGER})
+        kinds = json.loads((self.data / hooks.KINDS).read_text())
+        for entry in kinds.values():
+            entry["unknown_at"] = "2026-01-01T00:00:00Z"
+        (self.data / hooks.KINDS).write_text(json.dumps(kinds))
+        net = Network(Response(200, self.ME_PERSONAL), Response(200, SEARCH))
+        self.assertIn("additionalContext", self.run_hook("prompt", {"session_id": "s3", "prompt": LEDGER}, net=net))
+
+    def test_a_refused_key_is_marked(self) -> None:
+        net = Network(urllib.error.HTTPError("u", 401, "no", {}, io.BytesIO(b"")))
+        self.run_hook("session-start", {"session_id": "s1"}, net=net)
+        self.assertIn("refused (HTTP 401)", self.command("status"))
+
+    def test_claude_code_takes_no_key_from_alexein_api_key(self) -> None:
+        env = {"CLAUDE_PLUGIN_DATA": str(self.data), "ALEXEIN_API_KEY": "tm_project_0123456789abcd"}
+        self.assertEqual(hooks.Config(env=env).key, "")
+
+    def test_edit_names_leave_out_values(self) -> None:
+        given = {"new_string": "API_TOKEN_9f8e7d6c5b = 1\nconst retryBackoff = 2\nretryBackoff()\n"}
+        query, _, names = hooks.edit_query("src/jobs/retry.ts", given)
+        self.assertIn("retryBackoff", query)
+        self.assertNotIn("9f8e7d6c5b", query)

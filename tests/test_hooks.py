@@ -58,7 +58,8 @@ class Network:
             {
                 "url": request.full_url,
                 "headers": {k.lower(): v for k, v in request.header_items()},
-                "body": json.loads(request.data.decode()),
+                "method": request.get_method(),
+                "body": json.loads(request.data.decode()) if request.data else None,
                 "timeout": timeout,
             }
         )
@@ -111,6 +112,17 @@ class Base(unittest.TestCase):
         patcher = mock.patch.object(hooks, "spawn_sender", spawn)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # Every key the tests set is a personal key, as the API would say (`key_kind`; its own
+        # tests are in test_push.py).
+        self.kinds: list[str] = []
+
+        def kind(cfg):
+            self.kinds.append(cfg.key)
+            return "personal"
+
+        checker = mock.patch.object(hooks, "key_kind", kind)
+        checker.start()
+        self.addCleanup(checker.stop)
         # A sign-in is never started for real: no process, no browser.
         self.helpers: list[str] = []
         helper = mock.patch.object(
@@ -159,7 +171,7 @@ class SessionStart(Base):
     def test_prints_the_lines_and_no_network_without_a_key(self) -> None:
         """Signed out, the lines say recall is off and how to turn it on; the person is told once
         the browser sign-in has opened (SignIn in test_push.py)."""
-        env = {k: v for k, v in self.env.items() if k != "CLAUDE_PLUGIN_OPTION_API_KEY"}
+        env = {k: v for k, v in self.env.items() if not k.startswith("CLAUDE_PLUGIN_OPTION_API")}
         out = self.run_hook("session-start", {"session_id": "s1", "source": "startup"}, env=env)
         shown = json.loads(out)
         context = shown["hookSpecificOutput"]["additionalContext"]
