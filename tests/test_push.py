@@ -1008,3 +1008,92 @@ class KeyKind(Base):
         query, _, names = hooks.edit_query("src/jobs/retry.ts", given)
         self.assertIn("retryBackoff", query)
         self.assertNotIn("9f8e7d6c5b", query)
+
+
+class CheckingTheKey(Base):
+    """Until the API says what a key is, nothing is looked up or sent with it, the exchanges are
+    kept, and status and the session's note say so (second review, 2026-11-26)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.answer: list = [urllib.error.URLError("offline")]
+        real = mock.patch.object(hooks, "key_kind", self.ask)
+        real.start()
+        self.addCleanup(real.stop)
+
+    def ask(self, cfg):
+        answer = self.answer[0]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    def unknown_again(self) -> None:
+        kinds = json.loads((self.data / hooks.KINDS).read_text())
+        for entry in kinds.values():
+            entry["unknown_at"] = "2026-01-01T00:00:00Z"
+        (self.data / hooks.KINDS).write_text(json.dumps(kinds))
+
+    def test_kept_while_checking_and_said_so_then_sent_once_personal(self) -> None:
+        out = self.run_hook("session-start", {"session_id": "s1", "source": "startup"})
+        self.assertEqual(out.strip(), hooks.LINES + "\n" + hooks.CHECKING_LINE)
+        self.inline = False
+        for n in range(1, 6):
+            self.exchange(n)  # `refuse`: nothing looked up or sent
+        self.run_hook("flush", {"session_id": "s1"})
+        self.assertEqual(self.spawned, 0)
+        batches = self.outbox()
+        self.assertEqual(len(batches), 1)
+        self.assertEqual(len(json.loads(batches[0].read_text())["unchecked"]), 1)
+        shown = self.command("status")
+        self.assertIn("not yet confirmed as a personal key", shown)
+        self.assertIn("Automatic recall: waiting for the key to be confirmed", shown)
+        self.assertIn("kept on this computer", shown)
+        self.assertIn("Exchanges waiting to be sent: 5", shown)
+        # Confirmed personal: the next session start sends them.
+        self.unknown_again()
+        self.answer[0] = "personal"
+        self.inline = True
+        net = Network(Response(200, {}))
+        self.assertEqual(self.run_hook("session-start", {"session_id": "s2"}, net=net).strip(), hooks.LINES)
+        self.assertEqual(len(net.requests), 1)
+        self.assertEqual(len(net.requests[0]["body"]["items"]), 10)
+        self.assertEqual(self.outbox(), [])
+        self.assertIn("Automatic recall: on", self.command("status"))
+
+    def test_dropped_once_the_key_is_known_not_personal(self) -> None:
+        self.inline = False
+        self.exchange(1)
+        self.run_hook("flush", {"session_id": "s1"})
+        self.assertEqual(len(self.outbox()), 1)
+        self.unknown_again()
+        self.answer[0] = "project:acme.production"
+        self.run_hook("session-start", {"session_id": "s2"})
+        # Signed in since with a personal key: the sender sends nothing recorded with the other.
+        (self.data / hooks.SIGNED_IN).write_text(
+            json.dumps({"key": "tm_minted_0123456789abcdef", "api_url": "https://api.example.test"})
+        )
+        env = {k: v for k, v in self.env.items() if k != "CLAUDE_PLUGIN_OPTION_API_KEY"}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
+            hooks.urllib.request, "urlopen", refuse
+        ):
+            hooks.send(hooks.Config(env=env))
+        self.assertEqual(self.outbox(), [])
+        self.assertIn("not personal; dropped", (self.data / "errors.log").read_text())
+
+
+class SignInCount(Base):
+    def test_asking_does_not_reset_the_three_times(self) -> None:
+        env = {"CLAUDE_PLUGIN_DATA": str(self.data), "CLAUDE_CODE_SESSION_ATTENDED": "1"}
+        self.data.mkdir(parents=True)
+        (self.data / hooks.SIGN_IN_STATE).write_text(
+            json.dumps({"opened_at": "2026-01-01T00:00:00Z", "auto_tries": hooks.SIGN_IN_TRIES})
+        )
+        self.env = env
+        self.assertIn("browser is opening", self.command("sign-in"))
+        tried = json.loads((self.data / hooks.SIGN_IN_STATE).read_text())
+        self.assertEqual(tried["auto_tries"], hooks.SIGN_IN_TRIES)
+        tried["opened_at"] = "2026-01-01T00:00:00Z"
+        (self.data / hooks.SIGN_IN_STATE).write_text(json.dumps(tried))
+        with mock.patch.object(hooks.sys, "platform", "darwin"):
+            self.run_hook("session-start", {"session_id": "s1", "source": "startup"}, env=env)
+        self.assertEqual(self.helpers, ["sign-in-helper"])  # the asked one only

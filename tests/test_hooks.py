@@ -882,6 +882,10 @@ class Robustness(Base):
 
         env = dict(self.env)
         env["PATH"] = os.environ.get("PATH", "")
+        # The key is known to be personal, as a hook before this one found out: nothing is asked.
+        self.data.mkdir(parents=True)
+        mark = hooks._fingerprint(env["CLAUDE_PLUGIN_OPTION_API_KEY"])
+        (self.data / hooks.KINDS).write_text(json.dumps({mark: {"kind": "personal"}}))
         done = subprocess.run(
             [sys.executable, str(SCRIPT), "session-start"],
             input=json.dumps({"session_id": "s1", "source": "startup"}),
