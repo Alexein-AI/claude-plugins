@@ -102,7 +102,9 @@ class Copilot(Hosts):
 
     def test_no_key_gives_the_lines_and_touches_nothing(self) -> None:
         out = self.run_as("copilot", "session-start", {"session_id": "c1"}, env={"ALEXEIN_API_KEY": ""})
-        self.assertEqual(json.loads(out)["additionalContext"], hooks.LINES)
+        context = json.loads(out)["additionalContext"]
+        self.assertTrue(context.startswith(hooks.LINES + "\n- Automatic recall and saving are off"))
+        self.assertIn("run copilot sign-in", context)
         self.assertEqual(self.run_as("copilot", "prompt", {"prompt": QUESTION}, env={"ALEXEIN_API_KEY": ""}), "")
 
 
