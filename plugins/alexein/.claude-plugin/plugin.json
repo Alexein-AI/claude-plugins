@@ -1,7 +1,7 @@
 {
   "name": "alexein",
   "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time. Once signed in, it also brings what memory holds into each new session and saves your sessions to memory.",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": {
     "name": "Alexein",
     "email": "zainali@alexein.ai",
