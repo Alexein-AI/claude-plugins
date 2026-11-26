@@ -1,5 +1,5 @@
 ---
-description: "Show Alexein's state in Claude Code: whether an API key is set, whether saving is on or paused, and how many exchanges wait to be sent."
+description: "Show Alexein's state in Claude Code: whether the hooks are signed in or an API key is set, whether automatic recall and saving are on or paused, and how many exchanges wait to be sent."
 disable-model-invocation: true
 allowed-tools: Bash(python3 "${CLAUDE_PLUGIN_ROOT}/scripts/alexein_hooks.py" status *)
 ---

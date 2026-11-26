@@ -1,6 +1,6 @@
 {
   "name": "alexein",
-  "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time. With an API key, it also brings what memory holds into each new session and saves your sessions to memory.",
+  "description": "Connects Claude Code to your Alexein memory, so it can search what you have told it and save what it learns. Signs in with your Alexein account the first time. Once signed in, it also brings what memory holds into each new session and saves your sessions to memory.",
   "version": "0.2.3",
   "author": {
     "name": "Alexein",
@@ -23,7 +23,7 @@
     "api_key": {
       "type": "string",
       "title": "Alexein API key (optional)",
-      "description": "Optional. A personal key from My memory > Keys in the Alexein app; Read and write to save sessions. Without one, the memory tools still work through sign-in, and only the note on how to use them is added at each session start. With one, each session's first message is looked up in your memory (one retrieval per session) and your sessions are saved to it.",
+      "description": "Optional. A personal key from My memory > Keys in the Alexein app; Read and write to save sessions. Without one, the plugin signs in through your browser the first time (or with /alexein:sign-in), which does the same. Signed in or with a key, each session's first message is looked up in your memory (one retrieval per session) and your sessions are saved to it.",
       "sensitive": true,
       "required": false
     },

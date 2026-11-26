@@ -111,6 +111,13 @@ class Base(unittest.TestCase):
         patcher = mock.patch.object(hooks, "spawn_sender", spawn)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # A sign-in is never started for real: no process, no browser.
+        self.helpers: list[str] = []
+        helper = mock.patch.object(
+            hooks, "spawn_helper", lambda cfg, action: self.helpers.append(action)
+        )
+        helper.start()
+        self.addCleanup(helper.stop)
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
     def run_hook(
@@ -150,10 +157,27 @@ class Base(unittest.TestCase):
 
 class SessionStart(Base):
     def test_prints_the_lines_and_no_network_without_a_key(self) -> None:
+        """Signed out, the lines say recall is off and how to turn it on; the person is told once
+        the browser sign-in has opened (SignIn in test_push.py)."""
         env = {k: v for k, v in self.env.items() if k != "CLAUDE_PLUGIN_OPTION_API_KEY"}
         out = self.run_hook("session-start", {"session_id": "s1", "source": "startup"}, env=env)
+        shown = json.loads(out)
+        context = shown["hookSpecificOutput"]["additionalContext"]
+        self.assertEqual(shown["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertTrue(context.startswith(hooks.LINES + "\n- Automatic recall and saving are off"))
+        self.assertIn("/alexein:sign-in turns it on", context)
+        self.assertIn("browser window that just opened", shown["systemMessage"])
+        self.assertEqual(self.helpers, ["sign-in-helper"])
+        # The next session start of the day says recall is off, and opens nothing.
+        again = self.run_hook("session-start", {"session_id": "s2", "source": "startup"}, env=env)
+        self.assertEqual(again.strip(), hooks.LINES + "\n" + context.split("\n")[-1])
+        self.assertEqual(self.helpers, ["sign-in-helper"])
+
+    def test_the_lines_with_a_key_are_as_before(self) -> None:
+        out = self.run_hook("session-start", {"session_id": "s1", "source": "startup"})
         self.assertEqual(out.strip(), hooks.LINES)
         self.assertTrue(out.startswith("Alexein is connected over MCP."))
+        self.assertEqual(self.helpers, [])
 
     def test_lines_match_the_console(self) -> None:
         """The console's `sessionLines` (twin-memory-app lib/site/mcp.ts), when a checkout is beside
@@ -766,7 +790,8 @@ class Status(Base):
         self.run_hook("session-start", {"session_id": "s1"}, env=env)
         shown = self.command("status")
         self.assertIn("API key: not set", shown)
-        self.assertIn("Saving sessions: off (needs an API key)", shown)
+        self.assertIn("Automatic recall: off: /alexein:sign-in turns it on", shown)
+        self.assertIn("Saving sessions: off (needs a sign-in or an API key)", shown)
 
     def test_a_refused_key_is_shown_and_not_tried_again(self) -> None:
         """The hunt (2026-11-23): a revoked key showed as "set", and every session tried it."""
@@ -843,7 +868,7 @@ class Robustness(Base):
         """A real process: `python3 script action` with the hook's JSON on stdin."""
         import subprocess
 
-        env = {k: v for k, v in self.env.items() if k != "CLAUDE_PLUGIN_OPTION_API_KEY"}
+        env = dict(self.env)
         env["PATH"] = os.environ.get("PATH", "")
         done = subprocess.run(
             [sys.executable, str(SCRIPT), "session-start"],
@@ -868,6 +893,7 @@ class Manifest(unittest.TestCase):
                 "UserPromptSubmit",
                 "PostToolUse",
                 "PostToolUseFailure",
+                "PreToolUse",
                 "Stop",
                 "PreCompact",
                 "SessionEnd",
